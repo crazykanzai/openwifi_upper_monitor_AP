@@ -1,0 +1,44 @@
+ap:
+  host: "192.168.10.122"     # TODO: 修改为 AntSDR/openwifi AP IP
+  username: "root"          # TODO: 修改
+  password: "openwifi"   # 与 key_path 二选一；生产环境建议密钥
+  key_path: ""              # 例如: /home/ubuntu/.ssh/id_rsa
+  port: 22
+  interface: "sdr0"
+
+stas:
+  - name: "sta1"
+    host: "192.168.6.1"   # TODO: 修改
+    username: "root"
+    password: "abc2147832589"
+    key_path: ""
+    port: 22
+    iperf_port: 5201
+  - name: "sta2"
+    host: "192.168.7.1"   # TODO: 修改
+    username: "root"
+    password: "abc2147832589"
+    key_path: ""
+    port: 22
+    iperf_port: 5202
+  - name: "sta3"
+    host: "192.168.8.1"   # TODO: 修改
+    username: "root"
+    password: "abc2147832589"
+    key_path: ""
+    port: 22
+    iperf_port: 5203
+
+ubuntu:
+  server_ip: "192.168.10.1"   # TODO: 修改为 Ubuntu 虚拟机 IP
+  iperf_ports: [5201, 5202, 5203]
+  iperf_bin: "iperf3"
+
+experiment:
+  default_bandwidth: "20M"
+  default_duration: 3600
+  default_packet_len: 1470
+  default_parallel: 4
+  poll_interval_sec: 1
+  csv_dir: "data/logs"
+  csv_filename: "experiment_log.csv"

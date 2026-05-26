@@ -1,0 +1,5 @@
+streamlit>=1.35.0
+paramiko>=3.4.0
+pandas>=2.0.0
+plotly>=5.20.0
+PyYAML>=6.0.0
