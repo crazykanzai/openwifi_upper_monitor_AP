@@ -1,2 +1,7 @@
 data/logs/
 data/pcaps/
+.venv/
+__pycache__/
+*.pyc
+*.log
+config.yaml

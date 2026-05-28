@@ -9,6 +9,7 @@ class IperfServerManager:
     def __init__(self, iperf_bin: str = "iperf3"):
         self.iperf_bin = iperf_bin
         self.processes: Dict[int, subprocess.Popen] = {}
+        self.log_files: Dict[int, object] = {}
 
     def start_server(self, port: int, log_path: str) -> Tuple[bool, str]:
         if port in self.processes and self.processes[port].poll() is None:
@@ -28,6 +29,7 @@ class IperfServerManager:
                 text=True,
             )
             self.processes[port] = proc
+            self.log_files[port] = f
             return True, f"port {port} started"
         except Exception as e:
             f.close()
@@ -40,6 +42,9 @@ class IperfServerManager:
 
         if proc.poll() is not None:
             self.processes.pop(port, None)
+            log_file = self.log_files.pop(port, None)
+            if log_file:
+                log_file.close()
             return True, f"port {port} already exited"
 
         try:
@@ -51,6 +56,9 @@ class IperfServerManager:
             except Exception:
                 pass
         self.processes.pop(port, None)
+        log_file = self.log_files.pop(port, None)
+        if log_file:
+            log_file.close()
         return True, f"port {port} stopped"
 
     def start_all_servers(self, ports: List[int], log_dir: str) -> Dict[int, str]:

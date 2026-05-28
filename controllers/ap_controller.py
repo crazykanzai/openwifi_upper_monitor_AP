@@ -1,6 +1,7 @@
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
+import time
 
 import paramiko
 
@@ -58,8 +59,16 @@ class APController:
             local_path.parent.mkdir(parents=True, exist_ok=True)
 
             total = 0
+            start = time.monotonic()
+            timed_out = False
             with local_path.open("wb") as f:
                 while True:
+                    if time.monotonic() - start > timeout_sec:
+                        timed_out = True
+                        log_lines.append(f"命令超过 {timeout_sec}s，已中止。")
+                        channel.close()
+                        break
+
                     if channel.recv_ready():
                         data = channel.recv(65535)
                         if data:
@@ -74,7 +83,9 @@ class APController:
                         if err_chunk:
                             log_lines.append(err_chunk.decode(errors="ignore").strip())
 
-                rc = channel.recv_exit_status()
+                    time.sleep(0.05)
+
+                rc = -1 if timed_out else channel.recv_exit_status()
 
             client.close()
             return {"ok": rc == 0, "bytes": total, "rc": rc, "log": "\n".join([x for x in log_lines if x])}

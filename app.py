@@ -268,6 +268,7 @@ if st.session_state.latest_rows:
 
 if st.session_state.history_rows:
     hist = pd.DataFrame(st.session_state.history_rows)
+    st.line_chart(hist.pivot_table(index="timestamp", columns="station_mac", values="rx_drop_rate", aggfunc="last"))
     st.line_chart(hist.pivot_table(index="timestamp", columns="station_mac", values="tx_retry_rate", aggfunc="last"))
     st.line_chart(hist.pivot_table(index="timestamp", columns="station_mac", values="tx_failed_rate", aggfunc="last"))
 

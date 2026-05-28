@@ -70,11 +70,18 @@ def compute_station_deltas(current_rows: List[Dict], prev_map: Dict[str, Dict]) 
         mac = row["station_mac"]
         prev = prev_map.get(mac, {})
 
-        delta_rx_packets = max(0, row.get("rx_packets", 0) - prev.get("rx_packets", 0))
-        delta_rx_drop_misc = max(0, row.get("rx_drop_misc", 0) - prev.get("rx_drop_misc", 0))
-        delta_tx_packets = max(0, row.get("tx_packets", 0) - prev.get("tx_packets", 0))
-        delta_tx_retries = max(0, row.get("tx_retries", 0) - prev.get("tx_retries", 0))
-        delta_tx_failed = max(0, row.get("tx_failed", 0) - prev.get("tx_failed", 0))
+        if not prev:
+            delta_rx_packets = 0
+            delta_rx_drop_misc = 0
+            delta_tx_packets = 0
+            delta_tx_retries = 0
+            delta_tx_failed = 0
+        else:
+            delta_rx_packets = max(0, row.get("rx_packets", 0) - prev.get("rx_packets", 0))
+            delta_rx_drop_misc = max(0, row.get("rx_drop_misc", 0) - prev.get("rx_drop_misc", 0))
+            delta_tx_packets = max(0, row.get("tx_packets", 0) - prev.get("tx_packets", 0))
+            delta_tx_retries = max(0, row.get("tx_retries", 0) - prev.get("tx_retries", 0))
+            delta_tx_failed = max(0, row.get("tx_failed", 0) - prev.get("tx_failed", 0))
 
         rx_den = delta_rx_packets + delta_rx_drop_misc
         tx_retry_den = delta_tx_packets
