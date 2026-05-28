@@ -274,6 +274,26 @@ if st.session_state.history_rows:
 st.markdown("---")
 # 第五块：日志区
 st.subheader("日志区")
+
+log_c1, log_c2, log_c3 = st.columns([1, 1, 2])
+with log_c1:
+    csv_ready = bool(st.session_state.last_csv_path) and Path(st.session_state.last_csv_path).exists()
+    if csv_ready:
+        csv_bytes = Path(st.session_state.last_csv_path).read_bytes()
+        st.download_button(
+            "导出最近 CSV",
+            data=csv_bytes,
+            file_name=Path(st.session_state.last_csv_path).name,
+            mime="text/csv",
+        )
+    else:
+        st.button("导出最近 CSV", disabled=True)
+
+with log_c2:
+    if st.button("一键清除日志"):
+        st.session_state.logs = []
+       
+
 st.text_area("操作与错误日志", value="\n".join(st.session_state.logs[-120:]), height=260)
 st.write(f"最近 CSV: {st.session_state.last_csv_path or '暂无'}")
 st.write(f"最近 pcap: {st.session_state.last_pcap_path or '暂无'}")
