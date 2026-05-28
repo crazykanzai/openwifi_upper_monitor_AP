@@ -3,3 +3,4 @@ paramiko>=3.4.0
 pandas>=2.0.0
 plotly>=5.20.0
 PyYAML>=6.0.0
+streamlit-autorefresh>=1.0.1
