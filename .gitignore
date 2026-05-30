@@ -4,4 +4,7 @@ data/pcaps/
 __pycache__/
 *.pyc
 *.log
+*.pcap
+*.pcapng
+*.csv
 config.yaml

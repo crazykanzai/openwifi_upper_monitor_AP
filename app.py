@@ -1,9 +1,13 @@
 from datetime import datetime
+from html import escape
 from pathlib import Path
+from typing import List
 
 import pandas as pd
+import plotly.express as px
 import streamlit as st
 import yaml
+from streamlit.components.v1 import html
 from streamlit_autorefresh import st_autorefresh
 
 from controllers.ap_controller import APController
@@ -32,6 +36,65 @@ def add_log(message: str) -> None:
     st.session_state.logs.append(f"[{ts}] {message}")
     st.session_state.logs = st.session_state.logs[-300:]
     logger.info(message)
+
+
+def read_log_tail(log_path: Path, max_lines: int = 240) -> str:
+    if not log_path.exists():
+        return "等待 iperf3 输出..."
+    lines = log_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    if not lines:
+        return "等待 iperf3 输出..."
+    return "\n".join(lines[-max_lines:])
+
+
+def render_terminal(title: str, content: str, height: int = 420) -> None:
+    safe_title = escape(title)
+    safe_content = escape(content)
+    html(
+        f"""
+        <div style="font-family: monospace; border: 1px solid #3a3a3a; border-radius: 6px; background: #0e1117; color: #fafafa;">
+          <div style="padding: 8px 12px; border-bottom: 1px solid #3a3a3a; color: #9cdcfe; font-weight: 600;">
+            {safe_title}
+          </div>
+          <pre id="terminal-output" style="height: {height}px; overflow-y: auto; margin: 0; padding: 12px; white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.45;">{safe_content}</pre>
+        </div>
+        <script>
+          const output = document.getElementById("terminal-output");
+          output.scrollTop = output.scrollHeight;
+        </script>
+        """,
+        height=height + 54,
+    )
+
+
+def render_metric_card(label: str, value: str, help_text: str) -> None:
+    st.markdown(
+        f"""
+        <div style="border:1px solid #e5e7eb;border-radius:12px;padding:14px 16px;background:#ffffff;box-shadow:0 1px 2px rgba(0,0,0,0.04);">
+          <div style="font-size:13px;color:#64748b;margin-bottom:6px;">{escape(label)}</div>
+          <div style="font-size:26px;font-weight:700;color:#0f172a;">{escape(value)}</div>
+          <div style="font-size:12px;color:#94a3b8;margin-top:4px;">{escape(help_text)}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_line_chart(df: pd.DataFrame, fields: List[str], title: str, y_label: str) -> None:
+    available = [field for field in fields if field in df.columns]
+    if not available:
+        st.info(f"暂无 {title} 数据")
+        return
+    chart_df = df[["timestamp", "station_mac", *available]].copy()
+    long_df = chart_df.melt(id_vars=["timestamp", "station_mac"], value_vars=available, var_name="metric", value_name="value")
+    long_df = long_df.dropna(subset=["value"])
+    if long_df.empty:
+        st.info(f"暂无 {title} 数据")
+        return
+    long_df["series"] = long_df["station_mac"] + " · " + long_df["metric"]
+    fig = px.line(long_df, x="timestamp", y="value", color="series", markers=True, title=title)
+    fig.update_layout(height=330, margin=dict(l=20, r=20, t=48, b=20), yaxis_title=y_label, xaxis_title="时间")
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def init_state() -> None:
@@ -93,7 +156,8 @@ def do_sample() -> None:
     st.session_state.ap_online = True
 
     parsed = ap_ctrl.parse_station_dump(dump_text)
-    computed = compute_station_deltas(parsed, st.session_state.prev_station_map)
+    sampling_interval = float(cfg.get("sampling", {}).get("interval_sec", 1))
+    computed = compute_station_deltas(parsed, st.session_state.prev_station_map, sampling_interval)
     ts = datetime.now().isoformat(timespec="seconds")
     exp_dir = ensure_experiment_dir(str(BASE_LOG_DIR), st.session_state.experiment_name)
     csv_path = exp_dir / "station_dump.csv"
@@ -126,6 +190,8 @@ st.title("OpenWiFi / AntSDR AP Upper Monitor")
 if st.session_state.sampling_active:
     st_autorefresh(interval=int(cfg.get("sampling", {}).get("interval_sec", 1)) * 1000, key="station_autorefresh")
     do_sample()
+elif any(iperf_mgr.get_server_status(int(p)) for p in ports):
+    st_autorefresh(interval=1000, key="iperf_log_autorefresh")
 
 # 第一行：实验信息 + 当前状态
 left, right = st.columns([2, 1])
@@ -195,6 +261,7 @@ with c3:
 st.markdown("---")
 # 第三块：监听端口管理
 st.subheader("iperf3 server 监听端口管理")
+st.caption("这里只管理 Ubuntu 本机的 iperf3 -s 监听端口；STA 侧打流由队友的 STA 上位机或各自电脑完成。")
 server_log_dir = ensure_experiment_dir(str(BASE_LOG_DIR), st.session_state.experiment_name)
 
 m1, m2 = st.columns(2)
@@ -208,15 +275,24 @@ with m2:
 port_cols = st.columns(max(1, len(ports)))
 for idx, port in enumerate(ports):
     p = int(port)
+    running = iperf_mgr.get_server_status(p)
     with port_cols[idx]:
         st.markdown(f"**port {p}**")
-        st.write("running" if iperf_mgr.get_server_status(p) else "stopped")
+        st.write("running" if running else "stopped")
         if st.button(f"启动 {p}"):
             ok, msg = iperf_mgr.start_server(p, str(server_log_dir / f"iperf_server_{p}.log"))
             add_log(msg)
+            st.rerun()
         if st.button(f"停止 {p}"):
             ok, msg = iperf_mgr.stop_server(p)
             add_log(msg)
+            st.rerun()
+
+for port in ports:
+    p = int(port)
+    if iperf_mgr.get_server_status(p):
+        log_path = server_log_dir / f"iperf_server_{p}.log"
+        render_terminal(f"port {p} 实时输出", read_log_tail(log_path))
 
 st.markdown("---")
 # 第四块：station dump 实时监测
@@ -242,58 +318,82 @@ with s3:
         add_log("已停止 station dump 采样")
 
 st.caption(f"采样间隔: {cfg.get('sampling', {}).get('interval_sec', 1)} 秒")
+st.caption("rx_drop_rate / tx_retry_rate / tx_failed_rate 是相邻两次 station dump 计数差计算出的比例，不是每秒速率。第一次采样的 delta 记为 0。")
 
 if st.session_state.latest_rows:
     monitor_df = pd.DataFrame(st.session_state.latest_rows)
+    latest_total_rx = monitor_df.get("rx_throughput_mbps", pd.Series(dtype=float)).sum()
+    latest_total_tx = monitor_df.get("tx_throughput_mbps", pd.Series(dtype=float)).sum()
+    latest_retry = monitor_df.get("tx_retry_rate", pd.Series(dtype=float)).mean()
+    latest_signal = monitor_df.get("signal_avg", pd.Series(dtype=float)).mean()
+
+    card1, card2, card3, card4 = st.columns(4)
+    with card1:
+        render_metric_card("RX 吞吐", f"{latest_total_rx:.2f} Mbps", "STA → AP 当前总量")
+    with card2:
+        render_metric_card("TX 吞吐", f"{latest_total_tx:.2f} Mbps", "AP → STA 当前总量")
+    with card3:
+        render_metric_card("平均重传", f"{latest_retry:.3f}", "TX retries / packet")
+    with card4:
+        signal_text = "--" if pd.isna(latest_signal) else f"{latest_signal:.0f} dBm"
+        render_metric_card("平均信号", signal_text, "signal_avg")
+
     cols = [
         "station_mac",
         "signal",
         "signal_avg",
+        "tx_bitrate",
         "expected_throughput",
+        "rx_throughput_mbps",
+        "tx_throughput_mbps",
+        "expected_throughput_mbps",
+        "tx_bitrate_mbps",
         "rx_packets",
+        "rx_bytes",
         "rx_drop_misc",
         "tx_packets",
+        "tx_bytes",
         "tx_retries",
         "tx_failed",
         "delta_rx_packets",
+        "delta_rx_bytes",
         "delta_rx_drop_misc",
         "delta_tx_packets",
+        "delta_tx_bytes",
         "delta_tx_retries",
         "delta_tx_failed",
         "rx_drop_rate",
         "tx_retry_rate",
         "tx_failed_rate",
     ]
-    st.dataframe(monitor_df[[c for c in cols if c in monitor_df.columns]], use_container_width=True)
+    with st.expander("查看最新 station dump 明细", expanded=False):
+        st.dataframe(monitor_df[[c for c in cols if c in monitor_df.columns]], use_container_width=True)
+else:
+    st.info("暂无 station dump 数据。点击手动采样一次，或开始连续采样后会显示实时性能观察窗口。")
 
+st.subheader("实时性能观察窗口")
 if st.session_state.history_rows:
     hist = pd.DataFrame(st.session_state.history_rows)
-    st.line_chart(hist.pivot_table(index="timestamp", columns="station_mac", values="rx_drop_rate", aggfunc="last"))
-    st.line_chart(hist.pivot_table(index="timestamp", columns="station_mac", values="tx_retry_rate", aggfunc="last"))
-    st.line_chart(hist.pivot_table(index="timestamp", columns="station_mac", values="tx_failed_rate", aggfunc="last"))
+    tabs = st.tabs(["吞吐", "MAC 异常", "链路质量"])
+    with tabs[0]:
+        st.caption("基于相邻两次 station dump 的 byte delta 估算；expected throughput 是驱动估计值。")
+        render_line_chart(hist, ["rx_throughput_mbps", "tx_throughput_mbps", "expected_throughput_mbps"], "吞吐实时变化", "Mbps")
+    with tabs[1]:
+        st.caption("这些是 AP/MAC 层计数比例，不等同于 iperf3 端到端丢包率。")
+        render_line_chart(hist, ["rx_drop_rate", "tx_retry_rate", "tx_failed_rate"], "MAC 层异常实时变化", "ratio")
+    with tabs[2]:
+        st.caption("用于判断性能变化是否由链路质量或 PHY 速率变化引起。")
+        render_line_chart(hist, ["signal", "signal_avg", "tx_bitrate_mbps"], "链路质量实时变化", "dBm / Mbps")
+else:
+    st.info("连续采样开始后，这里会显示吞吐、重传/失败、信号质量的实时曲线。")
 
 st.markdown("---")
 # 第五块：日志区
 st.subheader("日志区")
 
-log_c1, log_c2, log_c3 = st.columns([1, 1, 2])
-with log_c1:
-    csv_ready = bool(st.session_state.last_csv_path) and Path(st.session_state.last_csv_path).exists()
-    if csv_ready:
-        csv_bytes = Path(st.session_state.last_csv_path).read_bytes()
-        st.download_button(
-            "导出最近 CSV",
-            data=csv_bytes,
-            file_name=Path(st.session_state.last_csv_path).name,
-            mime="text/csv",
-        )
-    else:
-        st.button("导出最近 CSV", disabled=True)
+if st.button("一键清除日志"):
+    st.session_state.logs = []
 
-with log_c2:
-    if st.button("一键清除日志"):
-        st.session_state.logs = []
-       
 
 st.text_area("操作与错误日志", value="\n".join(st.session_state.logs[-120:]), height=260)
 st.write(f"最近 CSV: {st.session_state.last_csv_path or '暂无'}")

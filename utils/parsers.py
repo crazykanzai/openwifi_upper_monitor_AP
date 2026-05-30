@@ -6,8 +6,24 @@ STATION_RE = re.compile(r"^Station\s+([0-9a-fA-F:]{17})")
 KV_NUM_RE = re.compile(r"^\s*([\w\s\-]+):\s*(-?\d+)")
 TX_BITRATE_RE = re.compile(r"^\s*tx bitrate:\s*(.+)$", re.IGNORECASE)
 EXPECTED_TP_RE = re.compile(r"^\s*expected throughput:\s*(.+)$", re.IGNORECASE)
+RATE_VALUE_RE = re.compile(r"(-?\d+(?:\.\d+)?)\s*([kmgt]?)(?:bits?/s|bit/s|bps|bits/sec|bit/sec|bps|mbps|mbytes/s|bytes/s)?", re.IGNORECASE)
 
 
+def parse_rate_mbps(value: str) -> float:
+    if not value:
+        return 0.0
+    match = RATE_VALUE_RE.search(value.replace("MBit/s", "Mbits/s"))
+    if not match:
+        return 0.0
+    number = float(match.group(1))
+    unit = match.group(2).lower()
+    if unit == "g":
+        return number * 1000
+    if unit == "k":
+        return number / 1000
+    if unit == "t":
+        return number * 1_000_000
+    return number
 def parse_station_dump(output: str) -> List[Dict]:
     stations: List[Dict] = []
     current: Optional[Dict] = None
@@ -64,22 +80,27 @@ def parse_station_dump(output: str) -> List[Dict]:
     return stations
 
 
-def compute_station_deltas(current_rows: List[Dict], prev_map: Dict[str, Dict]) -> List[Dict]:
+def compute_station_deltas(current_rows: List[Dict], prev_map: Dict[str, Dict], interval_sec: float = 1.0) -> List[Dict]:
     results = []
+    safe_interval = max(float(interval_sec), 0.001)
     for row in current_rows:
         mac = row["station_mac"]
         prev = prev_map.get(mac, {})
 
         if not prev:
             delta_rx_packets = 0
+            delta_rx_bytes = 0
             delta_rx_drop_misc = 0
             delta_tx_packets = 0
+            delta_tx_bytes = 0
             delta_tx_retries = 0
             delta_tx_failed = 0
         else:
             delta_rx_packets = max(0, row.get("rx_packets", 0) - prev.get("rx_packets", 0))
+            delta_rx_bytes = max(0, row.get("rx_bytes", 0) - prev.get("rx_bytes", 0))
             delta_rx_drop_misc = max(0, row.get("rx_drop_misc", 0) - prev.get("rx_drop_misc", 0))
             delta_tx_packets = max(0, row.get("tx_packets", 0) - prev.get("tx_packets", 0))
+            delta_tx_bytes = max(0, row.get("tx_bytes", 0) - prev.get("tx_bytes", 0))
             delta_tx_retries = max(0, row.get("tx_retries", 0) - prev.get("tx_retries", 0))
             delta_tx_failed = max(0, row.get("tx_failed", 0) - prev.get("tx_failed", 0))
 
@@ -90,18 +111,26 @@ def compute_station_deltas(current_rows: List[Dict], prev_map: Dict[str, Dict]) 
         rx_drop_rate = (delta_rx_drop_misc / rx_den) if rx_den > 0 else 0.0
         tx_retry_rate = (delta_tx_retries / tx_retry_den) if tx_retry_den > 0 else 0.0
         tx_failed_rate = (delta_tx_failed / tx_failed_den) if tx_failed_den > 0 else 0.0
+        rx_throughput_mbps = delta_rx_bytes * 8 / safe_interval / 1_000_000
+        tx_throughput_mbps = delta_tx_bytes * 8 / safe_interval / 1_000_000
 
         results.append(
             {
                 **row,
                 "delta_rx_packets": delta_rx_packets,
+                "delta_rx_bytes": delta_rx_bytes,
                 "delta_rx_drop_misc": delta_rx_drop_misc,
                 "delta_tx_packets": delta_tx_packets,
+                "delta_tx_bytes": delta_tx_bytes,
                 "delta_tx_retries": delta_tx_retries,
                 "delta_tx_failed": delta_tx_failed,
                 "rx_drop_rate": rx_drop_rate,
                 "tx_retry_rate": tx_retry_rate,
                 "tx_failed_rate": tx_failed_rate,
+                "rx_throughput_mbps": rx_throughput_mbps,
+                "tx_throughput_mbps": tx_throughput_mbps,
+                "expected_throughput_mbps": parse_rate_mbps(row.get("expected_throughput", "")),
+                "tx_bitrate_mbps": parse_rate_mbps(row.get("tx_bitrate", "")),
             }
         )
 

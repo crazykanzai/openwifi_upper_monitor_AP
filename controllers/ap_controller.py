@@ -32,19 +32,25 @@ class APController:
         return client
 
     def _run_command(self, cmd: str, timeout: int = 10) -> Tuple[bool, str, str]:
+        client = None
         try:
-            c = self._connect()
-            _, stdout, stderr = c.exec_command(cmd, timeout=timeout)
+            client = self._connect()
+            _, stdout, stderr = client.exec_command(cmd, timeout=timeout)
             out = stdout.read().decode(errors="ignore")
             err = stderr.read().decode(errors="ignore")
             rc = stdout.channel.recv_exit_status()
-            c.close()
             return rc == 0, out.strip(), err.strip()
         except Exception as e:
             return False, "", str(e)
+        finally:
+            if client:
+                client.close()
 
     def run_ssh_binary_command(self, command: str, local_output_path: str, timeout_sec: int = 60) -> Dict:
         log_lines = [f"$ {command}"]
+        client = None
+        channel = None
+        tmp_path = None
         try:
             client = self._connect()
             transport = client.get_transport()
@@ -57,11 +63,12 @@ class APController:
 
             local_path = Path(local_output_path)
             local_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp_path = local_path.with_name(f"{local_path.name}.tmp")
 
             total = 0
             start = time.monotonic()
             timed_out = False
-            with local_path.open("wb") as f:
+            with tmp_path.open("wb") as f:
                 while True:
                     if time.monotonic() - start > timeout_sec:
                         timed_out = True
@@ -87,10 +94,21 @@ class APController:
 
                 rc = -1 if timed_out else channel.recv_exit_status()
 
-            client.close()
+            if rc == 0:
+                tmp_path.replace(local_path)
+            elif tmp_path.exists():
+                tmp_path.unlink()
+
             return {"ok": rc == 0, "bytes": total, "rc": rc, "log": "\n".join([x for x in log_lines if x])}
         except Exception as e:
+            if tmp_path and tmp_path.exists():
+                tmp_path.unlink()
             return {"ok": False, "log": f"binary command 执行异常: {e}"}
+        finally:
+            if channel and not channel.closed:
+                channel.close()
+            if client:
+                client.close()
 
     def test_ap_connection(self) -> Tuple[bool, str]:
         ok, out, err = self._run_command("echo AP_OK", timeout=6)
@@ -140,10 +158,15 @@ class APController:
             if not ok_ip:
                 return {"ok": False, "log": "\n".join(logs)}
 
+        ok, out, err = self._run_command(f"ip link show {monitor_iface}", timeout=6)
+        logs.append(f"最终检查 {monitor_iface}: {out or err}")
+        if not ok:
+            return {"ok": False, "log": "\n".join(logs)}
+
         return {"ok": True, "log": "\n".join(logs)}
 
     def capture_monitor_pcap(self, local_path: str, monitor_iface: str = "mon0", packet_count: int = 1000, timeout_sec: int = 60) -> Dict:
-        cmd = f"tcpdump -i {monitor_iface} -c {int(packet_count)} -w -"
+        cmd = f"tcpdump -U -s 0 -i {monitor_iface} -c {int(packet_count)} -w -"
         result = self.run_ssh_binary_command(cmd, local_path, timeout_sec=timeout_sec)
 
         if not result.get("ok"):

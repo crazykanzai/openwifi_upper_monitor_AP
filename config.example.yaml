@@ -1,7 +1,9 @@
 ap:
   host: "192.168.10.122"
+  port: 22
   username: "root"
   password: "openwifi"
+  # key_path: "/home/user/.ssh/id_rsa"
   interface: "sdr0"
 
 ubuntu:

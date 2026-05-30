@@ -12,8 +12,14 @@ class IperfServerManager:
         self.log_files: Dict[int, object] = {}
 
     def start_server(self, port: int, log_path: str) -> Tuple[bool, str]:
-        if port in self.processes and self.processes[port].poll() is None:
+        proc = self.processes.get(port)
+        if proc and proc.poll() is None:
             return True, f"port {port} already running"
+        if proc:
+            self.processes.pop(port, None)
+            log_file = self.log_files.pop(port, None)
+            if log_file:
+                log_file.close()
 
         path = Path(log_path)
         path.parent.mkdir(parents=True, exist_ok=True)
