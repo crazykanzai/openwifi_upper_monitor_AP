@@ -11,15 +11,6 @@
 - 管理 Ubuntu 本机的 `iperf3 -s` server 监听端口，并在端口运行时实时显示类似终端的 server 输出。
 - 保存实验备注、CSV、pcap 和 iperf3 server 日志。
 
-本软件 **不负责 STA 侧打流控制**：
-
-- 不设置 STA 数量。
-- 不设置 STA 打流带宽。
-- 不设置 STA 打流时间。
-- 不设置 payload length。
-- 不生成或执行 STA 侧 `iperf3 -c` 命令。
-
-STA 打流由队友的 STA 上位机、其他电脑或 STA 设备独立完成。
 
 ## 运行条件
 
@@ -385,6 +376,3 @@ iw dev sdr0 station dump
 - 是否有权限启动监听端口。
 - 如果某个端口异常，先在 UI 中停止该端口，再重新启动。
 
-### 为什么 AP 软件不负责 STA 打流参数？
-
-本仓库定位是 AP 侧上位机，只负责 AP 控制、AP 侧观测和 Ubuntu 本机 server 管理。STA 数量、带宽、时长、payload length 和打流命令属于 STA 实验控制，应由 STA 上位机或队友电脑负责。这样可以避免 AP 软件和 STA 软件职责混在一起，便于多人协作和实验排障。
